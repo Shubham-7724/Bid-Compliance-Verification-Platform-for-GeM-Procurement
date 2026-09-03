@@ -387,7 +387,14 @@ async def upload_pdf(file: UploadFile = File(...)):
         passed_checks.append("GSTN Portal Active Status & Tax Compliance Verified")
     else:
         failed_checks.append("GSTN Not Found, Inactive or Invalid Format")
-        
+
+    # PAN verification (20 points)
+    if pan_verification.get("valid"):
+            score += 20
+            passed_checks.append("PAN verified.")
+    else:
+        failed_checks.append("PAN Not Found, Inactive or Invalid Format")
+
     # Experience verification (20 points)
     if years_of_experience >= 3:
         score += 20
