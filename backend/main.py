@@ -366,12 +366,178 @@ async def upload_pdf(file: UploadFile = File(...)):
     gst_match = re.search(r"\b([0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1})\b", extracted_text, re.IGNORECASE)
     udyam_match = re.search(r"\b(UDYAM-[A-Z]{2}-\d{2}-\d{6,7})\b", extracted_text, re.IGNORECASE)
     pan_match = re.search(r"\b([A-Z]{5}[0-9]{4}[A-Z]{1})\b", extracted_text, re.IGNORECASE)
-    
+
+    epfo_match = re.search(
+    r"(?:EPFO|EPF|Provident\s+Fund)"
+    r"\s*(?:Registration|Code|Number|No\.?)?"
+    r"\s*[:=-]\s*"
+    r"([A-Z0-9/-]{7,25})",
+    extracted_text,
+    re.IGNORECASE
+    )
+
+    esic_match = re.search(
+    r"(?:ESIC|ESI|Employees['’]?\s*State\s*Insurance)"
+    r"\s*(?:Registration|Code|Number|No\.?)?"
+    r"\s*[:=-]\s*"
+    r"([A-Z0-9/-]{8,25})",
+    extracted_text,
+    re.IGNORECASE
+    )
+
+    epfo_code = epfo_match.group(1) if epfo_match else None
+    esic_code = esic_match.group(1) if esic_match else None
+
+    # Startup India / NSIC / OEM Authorization verification using Ollama
+    startup_nsic_oem_prompt = f"""
+    Analyze the following government tender bid document and determine whether
+    Startup India, NSIC, and OEM authorization requirements are mentioned and
+    whether the bidder has provided evidence for them.
+
+    Understand different wording and synonyms. For example:
+    - Startup India may be described as Startup Recognition, DPIIT Recognition,
+      Startup India Certificate, DIPP Recognition, etc.
+    - NSIC may be described as NSIC Registration, National Small Industries
+      Corporation registration/certificate, etc.
+    - OEM may be described as Original Equipment Manufacturer authorization,
+      OEM certificate, manufacturer authorization letter, authorized dealer
+      certificate, etc.
+
+    Return ONLY valid JSON in this format:
+
+    {{
+        "startup_india": {{
+            "required": false,
+            "found": false,
+            "details": ""
+        }},
+        "nsic": {{
+            "required": false,
+            "found": false,
+            "details": ""
+        }},
+        "oem_authorization": {{
+            "required": false,
+            "found": false,
+            "details": ""
+        }}
+    }}
+
+    Tender document:
+    {extracted_text[:12000]}
+    """
+
+    startup_nsic_oem = {
+        "startup_india": {"required": False, "found": False, "details": ""},
+        "nsic": {"required": False, "found": False, "details": ""},
+        "oem_authorization": {"required": False, "found": False, "details": ""}
+    }
+
+    if is_ollama_alive():
+        try:
+            client = ollama.Client(timeout=8.0)
+
+            response = client.chat(
+                model="llama3.1:8b",
+                messages=[
+                    {"role": "user", "content": startup_nsic_oem_prompt}
+                ],
+                options={"temperature": 0.1}
+            )
+
+            raw_reply = response["message"]["content"].strip()
+
+            if raw_reply.startswith("```json"):
+                raw_reply = raw_reply[7:]
+            elif raw_reply.startswith("```"):
+                raw_reply = raw_reply[3:]
+
+            if raw_reply.endswith("```"):
+                raw_reply = raw_reply[:-3]
+
+            startup_nsic_oem = json.loads(raw_reply.strip())
+
+        except Exception as e:
+            print(f"Startup India / NSIC / OEM AI check failed: {e}")
+
     # Multi-Portal Mock Verification Calls
     gstn_verification = verify_gstn(gst_match.group(0)) if gst_match else {"valid": False, "message": "GSTIN Not Found in Bid Document"}
     msme_verification = verify_msme(udyam_match.group(0)) if udyam_match else {"valid": False, "message": "Udyam Number Not Found in Bid Document"}
     pan_verification = verify_pan(pan_match.group(0)) if pan_match else {"valid": False, "message": "PAN Not Found in Bid Document"}
-    
+
+    if epfo_code or esic_code:
+        epfo_esic_verification = {
+        "valid": True,
+        "status": "Verified",
+        "epfo_code": epfo_code,
+        "esic_code": esic_code,
+        "message": "EPFO / ESIC registration details found and verified"
+    }
+
+    elif epfo_esic_declaration:
+        epfo_esic_verification = {
+        "valid": False,
+        "status": "Pending",
+        "epfo_code": None,
+        "esic_code": None,
+        "message": "EPFO / ESIC requirement mentioned, but registration number was not found"
+    }
+
+    else:
+        epfo_esic_verification = {
+        "valid": False,
+        "status": "Missing",
+        "epfo_code": None,
+        "esic_code": None,
+        "message": "EPFO / ESIC registration details not found"
+    }
+        
+    # Make in India / Local Content verification
+    make_in_india_match = re.search(
+        r"(?:Make in India|Made in India|Local Content|Local Content Percentage)"
+        r".{0,100}?"
+        r"(\d{1,3}(?:\.\d+)?)\s*%",
+        extracted_text,
+        re.IGNORECASE | re.DOTALL
+    )
+
+    make_in_india_declaration = bool(
+        re.search(
+        r"(Make in India|Made in India|Local Content|Class[- ]?I Local Supplier|Class[- ]?II Local Supplier)",
+        extracted_text,
+        re.IGNORECASE
+        )
+    )
+
+    local_content_percentage = (
+        float(make_in_india_match.group(1))
+        if make_in_india_match
+        else None
+    )
+
+    # Make in India verification result
+    if make_in_india_declaration and local_content_percentage is not None:
+        make_in_india_verification = {
+        "valid": True,
+        "status": "Verified",
+        "local_content_percentage": local_content_percentage,
+        "message": f"Make in India declaration found with {local_content_percentage}% local content"
+    }
+    elif make_in_india_declaration:
+        make_in_india_verification = {
+            "valid": False,
+            "status": "Pending",
+            "local_content_percentage": None,
+            "message": "Make in India declaration found, but local content percentage is missing"
+        }
+    else:
+        make_in_india_verification = {
+            "valid": False,
+            "status": "Missing",
+            "local_content_percentage": None,
+            "message": "Make in India / local content declaration not found"
+        }
+
     # --- Scoring Logic ---
     score = 0
     passed_checks = []
@@ -421,7 +587,59 @@ async def upload_pdf(file: UploadFile = File(...)):
         passed_checks.append("Non-Blacklisting & Integrity Declaration Verified")
     else:
         failed_checks.append("Non-Blacklisting Affidavit / Self-Declaration Missing")
-        
+
+    # Make in India / Local Content verification
+    if make_in_india_verification.get("valid"):
+        score += 20
+        passed_checks.append(
+        f"Make in India / Local Content Verified "
+        f"({local_content_percentage}% local content)"
+        )
+    else:
+        failed_checks.append(
+        make_in_india_verification.get(
+            "message",
+            "Make in India / Local Content Requirement Not Verified"
+            )
+        )
+
+    # EPFO / ESIC verification
+    if epfo_esic_verification.get("valid"):
+        score += 20
+        passed_checks.append(
+        "EPFO / ESIC Registration Verified"
+    )
+    else:
+        failed_checks.append(
+        epfo_esic_verification.get(
+            "message",
+            "EPFO / ESIC Registration Not Verified"
+        )
+    )
+
+    # Startup India / NSIC / OEM Authorization verification
+    startup = startup_nsic_oem.get("startup_india", {})
+    nsic = startup_nsic_oem.get("nsic", {})
+    oem = startup_nsic_oem.get("oem_authorization", {})
+
+    if startup.get("required"):
+        if startup.get("found"):
+            passed_checks.append("Startup India Recognition Verified")
+        else:
+            failed_checks.append("Startup India Recognition Missing")
+
+    if nsic.get("required"):
+        if nsic.get("found"):
+            passed_checks.append("NSIC Registration Verified")
+        else:
+            failed_checks.append("NSIC Registration Missing")
+
+    if oem.get("required"):
+        if oem.get("found"):
+            passed_checks.append("OEM Authorization Verified")
+        else:
+            failed_checks.append("OEM Authorization Missing")
+    
     # Final Scoring Classification
     if score >= 80:
         compliance_status = "Compliant"
@@ -494,9 +712,11 @@ async def upload_pdf(file: UploadFile = File(...)):
             "gstin": gst_match.group(0) if gst_match else None,
             "udyam_no": udyam_match.group(0) if udyam_match else None,
             "pan_no": pan_match.group(0) if pan_match else None,
-            "has_affidavit": has_affidavit
-        },
-        "mock_api_verifications": {
+            "has_affidavit": has_affidavit,
+            "make_in_india": make_in_india_verification,
+            "epfo_esic": epfo_esic_verification,
+            "startup_nsic_oem": startup_nsic_oem,
+            "mock_api_verifications": {
             "gstn_verification": gstn_verification,
             "msme_verification": msme_verification,
             "pan_verification": pan_verification
@@ -510,7 +730,7 @@ async def upload_pdf(file: UploadFile = File(...)):
         "ai_review": ai_review,
         "evaluated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     }
-
+}
 
 @app.get("/get-evaluation/{filename}")
 def get_evaluation(filename: str):
