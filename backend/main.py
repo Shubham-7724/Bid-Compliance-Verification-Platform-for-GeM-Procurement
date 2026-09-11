@@ -335,7 +335,52 @@ async def upload_pdf(file: UploadFile = File(...)):
             status_code=400,
             detail="No readable text found in the PDF. Please upload a valid bid document."
         )
+    # Blacklist verification
+    company_name_match = re.search(
+    r"(?:Company Name|Bidder Name|Firm Name|Legal Name|Enterprise Name)\s*[:=-]\s*(.+)",
+    extracted_text,
+    re.IGNORECASE
+    )
 
+    company_name = company_name_match.group(1).strip() if company_name_match else None
+
+    # Mock blacklist database for prototype
+    blacklisted_companies = [
+    "ABC INFRASTRUCTURE PRIVATE LIMITED",
+    "XYZ TECHNOLOGIES PVT LTD",
+    "TEST BLACKLISTED COMPANY"
+    ]
+
+    blacklist_verification = {
+    "company_name": company_name,
+    "found": False,
+    "status": "CLEAR",
+    "message": "Company not found in blacklist records"
+    }
+
+    if company_name:
+        normalized_company = re.sub(
+        r"[^A-Z0-9]",
+        "",
+        company_name.upper()
+    )
+
+    for blacklisted_company in blacklisted_companies:
+        normalized_blacklisted = re.sub(
+            r"[^A-Z0-9]",
+            "",
+            blacklisted_company.upper()
+        )
+
+        if normalized_company == normalized_blacklisted:
+            blacklist_verification = {
+                "company_name": company_name,
+                "found": True,
+                "status": "BLACKLISTED",
+                "message": "Company found in blacklist records"
+            }
+            break
+    
     # Regex parsing and text matching
     has_msme_cert = bool(re.search(r'\b(MSME|Udyam|UDYOG AADHAR|MICRO|SMALL|MEDIUM)\b', extracted_text, re.IGNORECASE))
     
@@ -542,6 +587,16 @@ async def upload_pdf(file: UploadFile = File(...)):
     score = 0
     passed_checks = []
     failed_checks = []
+
+    #Blacklist result
+    if blacklist_verification["found"]:
+        failed_checks.append(
+        "⚠️ Company Found in Blacklist"
+    )
+    else:
+        passed_checks.append(
+        "Blacklist Verification Passed"
+    )
     
     # MSME verification (20 points)
     if has_msme_cert or msme_verification.get("valid"):
@@ -716,6 +771,7 @@ async def upload_pdf(file: UploadFile = File(...)):
             "make_in_india": make_in_india_verification,
             "epfo_esic": epfo_esic_verification,
             "startup_nsic_oem": startup_nsic_oem,
+            "blacklist_verification": blacklist_verification,
             "mock_api_verifications": {
             "gstn_verification": gstn_verification,
             "msme_verification": msme_verification,
