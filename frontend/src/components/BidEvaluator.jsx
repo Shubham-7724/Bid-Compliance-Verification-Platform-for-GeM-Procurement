@@ -154,6 +154,13 @@ export default function BidEvaluator({ currentEvaluation, setCurrentEvaluation, 
                 2. Or Instant Pitch Demo (1-Click Sample Bids)
               </span>
               <div className="space-y-2">
+                {uploadError && (
+                    <div className="p-3 mb-2 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs flex items-start gap-2">
+                        <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                        <span>{uploadError}</span>
+                    </div>
+                )}
+
                 {SAMPLE_BIDS_CATALOG.map((s) => (
                   <button
                     key={s.id}
@@ -180,13 +187,6 @@ export default function BidEvaluator({ currentEvaluation, setCurrentEvaluation, 
           </div>
 
         </div>
-
-        {uploadError && (
-          <div className="mt-4 p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs flex items-center gap-2">
-            <AlertCircle className="w-4 h-4 flex-shrink-0" />
-            <span>{uploadError}</span>
-          </div>
-        )}
       </div>
 
       {/* Main Results View if Evaluation exists */}
