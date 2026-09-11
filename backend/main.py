@@ -510,6 +510,14 @@ async def upload_pdf(file: UploadFile = File(...)):
     msme_verification = verify_msme(udyam_match.group(0)) if udyam_match else {"valid": False, "message": "Udyam Number Not Found in Bid Document"}
     pan_verification = verify_pan(pan_match.group(0)) if pan_match else {"valid": False, "message": "PAN Not Found in Bid Document"}
 
+    epfo_esic_declaration = bool(
+    re.search(
+        r"\b(EPFO|EPF|ESIC|ESI|Provident\s+Fund|Employees['’]?\s+State\s+Insurance)\b",
+        extracted_text,
+        re.IGNORECASE
+    )
+    )
+
     if epfo_code or esic_code:
         epfo_esic_verification = {
         "valid": True,
