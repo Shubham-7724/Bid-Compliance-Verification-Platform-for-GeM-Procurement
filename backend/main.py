@@ -331,7 +331,10 @@ async def upload_pdf(file: UploadFile = File(...)):
         raise HTTPException(status_code=500, detail=f"Error occurred while processing the PDF file: {str(e)}")
 
     if not extracted_text.strip():
-        extracted_text = "Tender Reference: GEM/2026/B/894721. Company: TechnoCorp India. Experience: 4 years of experience. Turnover: 85,00,000 Sales. MSME Udyam: UDYAM-KR-03-0028194. GSTIN: 29ABCDE1234F1Z5. PAN: ABCDE1234F. Non-Blacklisting Declaration Affidavit submitted."
+        raise HTTPException(
+            status_code=400,
+            detail="No readable text found in the PDF. Please upload a valid bid document."
+        )
 
     # Regex parsing and text matching
     has_msme_cert = bool(re.search(r'\b(MSME|Udyam|UDYOG AADHAR|MICRO|SMALL|MEDIUM)\b', extracted_text, re.IGNORECASE))
